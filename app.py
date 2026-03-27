@@ -1,0 +1,244 @@
+import streamlit as st
+import yfinance as yf
+import pandas as pd
+import plotly.graph_objects as go
+import plotly.express as px
+from datetime import date, timedelta
+
+TURKISH_BANKS = {
+    "Garanti BBVA": "GARAN.IS",
+    "Akbank": "AKBNK.IS",
+    "İş Bankası": "ISCTR.IS",
+    "Yapı Kredi": "YKBNK.IS",
+    "Halkbank": "HALKB.IS",
+    "Vakıfbank": "VAKBN.IS",
+    "TSKB": "TSKB.IS",
+    "Albaraka Türk": "ALBRK.IS",
+    "QNB Finansbank": "QNBFB.IS",
+    "Şekerbank": "SKBNK.IS",
+}
+
+INDICES = {
+    "Bankacılık Endeksi (XBANK)": "XBANK.IS",
+    "BIST 100 (XU100)": "XU100.IS",
+}
+
+OTHER_ASSETS = {
+    "Altın (USD)": "GC=F",
+    "Gümüş (USD)": "SI=F",
+    "NASDAQ": "^IXIC",
+    "Dolar / TL": "USDTRY=X",
+    "Euro / TL": "EURTRY=X",
+}
+
+st.set_page_config(
+    page_title="Türk Bankaları Hisse Analizi",
+    page_icon="🏦",
+    layout="wide",
+)
+
+st.title("🏦 Türk Bankaları Hisse Artış Oranları")
+st.markdown("Yahoo Finance verilerini kullanarak seçilen tarih aralığındaki hisse performansını gösterir.")
+
+with st.sidebar:
+    st.header("⚙️ Ayarlar")
+
+    selected_banks = st.multiselect(
+        "Bankalar",
+        options=list(TURKISH_BANKS.keys()),
+        default=list(TURKISH_BANKS.keys())[:5],
+    )
+
+    st.markdown("**Endeksler**")
+    show_xbank = st.checkbox("Bankacılık Endeksi (XBANK)", value=True)
+    show_xu100 = st.checkbox("BIST 100 (XU100)", value=True)
+
+    st.markdown("**Diğer Varlıklar**")
+    selected_others = st.multiselect(
+        "Varlık Seç",
+        options=list(OTHER_ASSETS.keys()),
+        default=[],
+        label_visibility="collapsed",
+    )
+
+    col1, col2 = st.columns(2)
+    with col1:
+        start_date = st.date_input(
+            "Başlangıç Tarihi",
+            value=date.today() - timedelta(days=365),
+            max_value=date.today() - timedelta(days=1),
+        )
+    with col2:
+        end_date = st.date_input(
+            "Bitiş Tarihi",
+            value=date.today(),
+            max_value=date.today(),
+        )
+
+    chart_type = st.radio(
+        "Grafik Türü",
+        ["Çizgi Grafik", "Bar Grafik"],
+    )
+
+    fetch_btn = st.button("📊 Verileri Getir", use_container_width=True, type="primary")
+
+selected_indices = {}
+if show_xbank:
+    selected_indices["Bankacılık Endeksi (XBANK)"] = INDICES["Bankacılık Endeksi (XBANK)"]
+if show_xu100:
+    selected_indices["BIST 100 (XU100)"] = INDICES["BIST 100 (XU100)"]
+
+selected_other_assets = {k: OTHER_ASSETS[k] for k in selected_others}
+
+if not selected_banks and not selected_indices and not selected_other_assets:
+    st.warning("Lütfen en az bir banka veya endeks seçin.")
+    st.stop()
+
+if start_date >= end_date:
+    st.error("Başlangıç tarihi, bitiş tarihinden önce olmalıdır.")
+    st.stop()
+
+if fetch_btn or "df_results" not in st.session_state:
+    all_items = {**{b: TURKISH_BANKS[b] for b in selected_banks}, **selected_indices, **selected_other_assets}
+    tickers = list(all_items.values())
+
+    with st.spinner("Veriler Yahoo Finance'den çekiliyor..."):
+        try:
+            raw = yf.download(
+                tickers,
+                start=start_date,
+                end=end_date + timedelta(days=1),
+                progress=False,
+                auto_adjust=True,
+            )
+
+            if raw.empty:
+                st.error("Seçilen tarih aralığında veri bulunamadı.")
+                st.stop()
+
+            close = raw["Close"] if len(tickers) > 1 else raw[["Close"]]
+            if len(tickers) == 1:
+                close.columns = tickers
+
+            results = []
+            price_data = {}
+
+            for name, ticker in all_items.items():
+                if ticker not in close.columns:
+                    continue
+                series = close[ticker].dropna()
+                if len(series) < 2:
+                    continue
+
+                start_price = series.iloc[0]
+                end_price = series.iloc[-1]
+                change_pct = ((end_price - start_price) / start_price) * 100
+                is_index = name in selected_indices or name in selected_other_assets
+                max_price = series.max()
+                max_date = series.idxmax().strftime("%d.%m.%Y")
+
+                results.append({
+                    "Ad": name,
+                    "Sembol": ticker,
+                    "Tür": "Endeks" if is_index else "Hisse",
+                    "Başlangıç Değeri (₺)": round(start_price, 2),
+                    "Bitiş Değeri (₺)": round(end_price, 2),
+                    "Artış / Düşüş (%)": round(change_pct, 2),
+                    "En Yüksek (₺)": round(max_price, 2),
+                    "En Yüksek Tarih": max_date,
+                })
+
+                normalized = (series / series.iloc[0] - 1) * 100
+                price_data[name] = (normalized, is_index)
+
+            st.session_state["df_results"] = pd.DataFrame(results)
+            st.session_state["price_data"] = price_data
+
+        except Exception as e:
+            st.error(f"Veri çekilirken hata oluştu: {e}")
+            st.stop()
+
+df = st.session_state.get("df_results", pd.DataFrame())
+price_data = st.session_state.get("price_data", {})
+
+if df.empty:
+    st.info("Sol panelden tarih aralığı ve banka seçip 'Verileri Getir' butonuna basın.")
+    st.stop()
+
+# --- Özet Kartlar ---
+st.subheader("📈 Özet")
+cols = st.columns(len(df))
+for i, row in df.iterrows():
+    with cols[i]:
+        st.metric(
+            label=row["Ad"],
+            value=f"₺{row['Bitiş Değeri (₺)']:.2f}",
+            delta=f"{row['Artış / Düşüş (%)']:+.2f}%",
+        )
+        dist_from_high = ((row['Bitiş Değeri (₺)'] - row['En Yüksek (₺)']) / row['En Yüksek (₺)']) * 100
+        st.markdown(
+            f"<p style='font-size:0.875rem; color:#888; margin-top:-12px; line-height:1.7;'>"
+            f"Başlangıç: ₺{row['Başlangıç Değeri (₺)']:.2f}<br>"
+            f"En Yüksek: ₺{row['En Yüksek (₺)']:.2f}<br>"
+            f"Tarih: {row['En Yüksek Tarih']}<br>"
+            f"Zirveden Uzaklık: {dist_from_high:+.2f}%"
+            f"</p>",
+            unsafe_allow_html=True,
+        )
+
+st.divider()
+
+# --- Grafik ---
+st.subheader("📊 Normalize Fiyat Değişimi (%)")
+
+if chart_type == "Çizgi Grafik":
+    fig = go.Figure()
+    for name, (series, is_index) in price_data.items():
+        fig.add_trace(go.Scatter(
+            x=series.index,
+            y=series.values,
+            name=name,
+            mode="lines",
+            line=dict(width=3 if is_index else 1.5, dash="dash" if is_index else "solid"),
+        ))
+    fig.update_layout(
+        xaxis_title="Tarih",
+        yaxis_title="Değişim (%)",
+        hovermode="x unified",
+        height=450,
+        yaxis=dict(ticksuffix="%"),
+    )
+else:
+    bar_df = df.sort_values("Artış / Düşüş (%)", ascending=True)
+    colors = ["#ef4444" if v < 0 else "#22c55e" for v in bar_df["Artış / Düşüş (%)"]]
+    fig = go.Figure(go.Bar(
+        x=bar_df["Artış / Düşüş (%)"],
+        y=bar_df["Ad"],
+        orientation="h",
+        marker_color=colors,
+        text=[f"{v:+.2f}%" for v in bar_df["Artış / Düşüş (%)"]],
+        textposition="outside",
+    ))
+    fig.update_layout(
+        xaxis_title="Artış / Düşüş (%)",
+        xaxis=dict(ticksuffix="%"),
+        height=400,
+    )
+
+st.plotly_chart(fig, use_container_width=True)
+
+st.divider()
+
+# --- Tablo ---
+st.subheader("📋 Detaylı Tablo")
+styled = df.copy()
+st.dataframe(
+    styled,
+    hide_index=True,
+    use_container_width=True,
+    column_config={
+        "Artış / Düşüş (%)": st.column_config.NumberColumn(format="%.2f%%"),
+        "Başlangıç Değeri (₺)": st.column_config.NumberColumn(format="₺%.2f"),
+        "Bitiş Değeri (₺)": st.column_config.NumberColumn(format="₺%.2f"),
+    },
+)
