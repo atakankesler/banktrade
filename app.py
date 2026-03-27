@@ -166,6 +166,11 @@ if df.empty:
     st.stop()
 
 # --- Özet Kartlar ---
+st.markdown("""
+<style>
+[data-testid="stMetricValue"] { font-size: 0.875rem !important; font-weight: 700 !important; }
+</style>
+""", unsafe_allow_html=True)
 st.subheader("📈 Özet")
 cols = st.columns(len(df))
 for i, row in df.iterrows():
