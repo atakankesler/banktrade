@@ -31,12 +31,6 @@ OTHER_ASSETS = {
     "Gümüş (USD)": "SI=F",
 }
 
-st.set_page_config(
-    page_title="US Tech Stocks Analysis",
-    page_icon="💻",
-    layout="wide",
-)
-
 st.title("💻 US Tech Stocks Artış Oranları")
 st.markdown("Yahoo Finance verilerini kullanarak seçilen tarih aralığındaki hisse performansını gösterir.")
 
