@@ -256,17 +256,11 @@ st.subheader("📈 Özet")
 cols = st.columns(len(df))
 for i, row in df.iterrows():
     with cols[i]:
-        st.metric(
-            label=row["Ad"],
-            value=f"₺{row['Bitiş Değeri (₺)']:.2f}",
-            delta=f"{row['Artış / Düşüş (%)']:+.2f}%",
-        )
         dist_from_high = ((row['Bitiş Değeri (₺)'] - row['En Yüksek (₺)']) / row['En Yüksek (₺)']) * 100
-
         name = row["Ad"]
         sup_str, res_str = "—", "—"
-        zone_html = ""
-        yorum_html = ""
+        zone, yorum = None, ""
+
         if name in raw_close:
             series, _ = raw_close[name]
             if len(series) >= 25:
@@ -275,26 +269,37 @@ for i, row in df.iterrows():
                     sup_str = " / ".join(f"₺{v:.2f}" for v in sup_levels[:2])
                 if res_levels:
                     res_str = " / ".join(f"₺{v:.2f}" for v in res_levels[:2])
-
             if len(series) >= 35:
                 zone, yorum = zone_signal(series)
-                if zone == "buy":
-                    zone_html = "<span style='background:#22c55e;color:#fff;padding:1px 6px;border-radius:4px;font-size:0.75rem;'>Alım Bölgesi</span><br>"
-                elif zone == "sell":
-                    zone_html = "<span style='background:#ef4444;color:#fff;padding:1px 6px;border-radius:4px;font-size:0.75rem;'>Satım Bölgesi</span><br>"
-                yorum_html = f"<span style='font-size:0.75rem;color:#aaa;'>{yorum}</span><br>"
+
+        delta_val = row['Artış / Düşüş (%)']
+        delta_color = "#22c55e" if delta_val >= 0 else "#ef4444"
+        delta_sign = "+" if delta_val >= 0 else ""
+
+        if zone == "buy":
+            border = "2px solid #22c55e"
+            badge = "<span style='background:#22c55e;color:#fff;padding:1px 6px;border-radius:4px;font-size:0.75rem;'>Alım Bölgesi</span><br>"
+        elif zone == "sell":
+            border = "2px solid #ef4444"
+            badge = "<span style='background:#ef4444;color:#fff;padding:1px 6px;border-radius:4px;font-size:0.75rem;'>Satım Bölgesi</span><br>"
+        else:
+            border = "1px solid #333"
+            badge = ""
 
         st.markdown(
-            f"<p style='font-size:0.875rem; color:#888; margin-top:-12px; line-height:1.7;'>"
+            f"<div style='border:{border};border-radius:10px;padding:12px 14px;margin-bottom:4px;'>"
+            f"<div style='font-size:0.8rem;color:#aaa;margin-bottom:2px;'>{name}</div>"
+            f"<div style='font-size:1.35rem;font-weight:700;'>₺{row['Bitiş Değeri (₺)']:.2f}</div>"
+            f"<div style='color:{delta_color};font-size:0.9rem;font-weight:600;margin-bottom:6px;'>{delta_sign}{delta_val:.2f}%</div>"
+            f"<div style='font-size:0.8rem;color:#888;line-height:1.8;'>"
             f"Başlangıç: ₺{row['Başlangıç Değeri (₺)']:.2f}<br>"
-            f"En Yüksek: ₺{row['En Yüksek (₺)']:.2f}<br>"
-            f"Tarih: {row['En Yüksek Tarih']}<br>"
-            f"Zirveden Uzaklık: {dist_from_high:+.2f}%<br>"
+            f"En Yüksek: ₺{row['En Yüksek (₺)']:.2f} ({row['En Yüksek Tarih']})<br>"
+            f"Zirveden: {dist_from_high:+.2f}%<br>"
             f"<span style='color:#ef4444;'>{res_str}</span><br>"
             f"<span style='color:#22c55e;'>{sup_str}</span><br>"
-            f"{zone_html}"
-            f"{yorum_html}"
-            f"</p>",
+            f"{badge}"
+            f"<span style='font-size:0.72rem;color:#666;'>{yorum}</span>"
+            f"</div></div>",
             unsafe_allow_html=True,
         )
 
