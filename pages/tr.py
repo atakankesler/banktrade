@@ -212,14 +212,23 @@ for i, row in df.iterrows():
 
         name = row["Ad"]
         sup_str, res_str = "—", "—"
+        zone_html = ""
         if name in raw_close:
             series, _ = raw_close[name]
             if len(series) >= 25:
                 sup_levels, res_levels = find_support_resistance(series)
+                current = float(series.iloc[-1])
                 if sup_levels:
                     sup_str = " / ".join(f"₺{v:.2f}" for v in sup_levels[:2])
                 if res_levels:
                     res_str = " / ".join(f"₺{v:.2f}" for v in res_levels[:2])
+
+                near_support = sup_levels and abs(current - sup_levels[0]) / sup_levels[0] <= 0.03
+                near_resistance = res_levels and abs(current - res_levels[0]) / res_levels[0] <= 0.03
+                if near_support:
+                    zone_html = "<span style='background:#22c55e;color:#fff;padding:1px 6px;border-radius:4px;font-size:0.75rem;'>Alım Bölgesi</span><br>"
+                elif near_resistance:
+                    zone_html = "<span style='background:#ef4444;color:#fff;padding:1px 6px;border-radius:4px;font-size:0.75rem;'>Satım Bölgesi</span><br>"
 
         st.markdown(
             f"<p style='font-size:0.875rem; color:#888; margin-top:-12px; line-height:1.7;'>"
@@ -228,7 +237,8 @@ for i, row in df.iterrows():
             f"Tarih: {row['En Yüksek Tarih']}<br>"
             f"Zirveden Uzaklık: {dist_from_high:+.2f}%<br>"
             f"<span style='color:#ef4444;'>{res_str}</span><br>"
-            f"<span style='color:#22c55e;'>{sup_str}</span>"
+            f"<span style='color:#22c55e;'>{sup_str}</span><br>"
+            f"{zone_html}"
             f"</p>",
             unsafe_allow_html=True,
         )
