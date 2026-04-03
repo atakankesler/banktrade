@@ -36,15 +36,15 @@ def zone_signal(series):
     elif current > upper_bb.iloc[-1]:
         signals.append(("BB", "sell", "üst bant"))
 
-    # MACD (12, 26, 9)
+    # MACD (12, 26, 9) — signal line pozisyonu
     ema12 = series.ewm(span=12, adjust=False).mean()
     ema26 = series.ewm(span=26, adjust=False).mean()
     macd = ema12 - ema26
     signal_line = macd.ewm(span=9, adjust=False).mean()
-    if macd.iloc[-1] > signal_line.iloc[-1] and macd.iloc[-2] <= signal_line.iloc[-2]:
-        signals.append(("MACD", "buy", "kesişim↑"))
-    elif macd.iloc[-1] < signal_line.iloc[-1] and macd.iloc[-2] >= signal_line.iloc[-2]:
-        signals.append(("MACD", "sell", "kesişim↓"))
+    if macd.iloc[-1] > signal_line.iloc[-1]:
+        signals.append(("MACD", "buy", "↑"))
+    elif macd.iloc[-1] < signal_line.iloc[-1]:
+        signals.append(("MACD", "sell", "↓"))
 
     buy_count = sum(1 for _, d, _ in signals if d == "buy")
     sell_count = sum(1 for _, d, _ in signals if d == "sell")
