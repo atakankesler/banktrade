@@ -7,53 +7,56 @@ from datetime import date, timedelta
 
 
 def zone_signal(series):
-    """RSI + Bollinger Bands + MACD ile alım/satım bölgesi tespiti.
-    En az 2/3 gösterge aynı yönü işaret ediyorsa sinyal üretir."""
+    """RSI + Bollinger Bands + MACD hesaplar, gösterge değerleri ve yorum döndürür."""
     if len(series) < 35:
-        return None, []
-
-    signals = []
+        return None, ""
 
     # RSI (14)
     delta = series.diff()
     gain = delta.clip(lower=0).rolling(14).mean()
     loss = (-delta.clip(upper=0)).rolling(14).mean()
-    rsi = 100 - (100 / (1 + gain / loss))
-    rsi_val = rsi.iloc[-1]
-    if rsi_val < 35:
-        signals.append(("RSI", "buy", f"{rsi_val:.0f}"))
-    elif rsi_val > 65:
-        signals.append(("RSI", "sell", f"{rsi_val:.0f}"))
+    rsi_val = float(100 - (100 / (1 + gain / loss)).iloc[-1])
 
     # Bollinger Bands (20, 2σ)
     sma = series.rolling(20).mean()
     std = series.rolling(20).std()
-    upper_bb = sma + 2 * std
-    lower_bb = sma - 2 * std
-    current = series.iloc[-1]
-    if current < lower_bb.iloc[-1]:
-        signals.append(("BB", "buy", "alt bant"))
-    elif current > upper_bb.iloc[-1]:
-        signals.append(("BB", "sell", "üst bant"))
+    upper_bb = float((sma + 2 * std).iloc[-1])
+    lower_bb = float((sma - 2 * std).iloc[-1])
+    current = float(series.iloc[-1])
+    bb_pct = (current - lower_bb) / (upper_bb - lower_bb) * 100  # 0=alt, 100=üst
 
-    # MACD (12, 26, 9) — signal line pozisyonu
+    # MACD (12, 26, 9)
     ema12 = series.ewm(span=12, adjust=False).mean()
     ema26 = series.ewm(span=26, adjust=False).mean()
     macd = ema12 - ema26
     signal_line = macd.ewm(span=9, adjust=False).mean()
-    if macd.iloc[-1] > signal_line.iloc[-1]:
-        signals.append(("MACD", "buy", "↑"))
-    elif macd.iloc[-1] < signal_line.iloc[-1]:
-        signals.append(("MACD", "sell", "↓"))
+    macd_bull = macd.iloc[-1] > signal_line.iloc[-1]
 
-    buy_count = sum(1 for _, d, _ in signals if d == "buy")
-    sell_count = sum(1 for _, d, _ in signals if d == "sell")
+    # Skorlama
+    score = 0
+    if rsi_val < 35: score += 1
+    elif rsi_val > 65: score -= 1
+    if bb_pct < 20: score += 1
+    elif bb_pct > 80: score -= 1
+    if macd_bull: score += 1
+    else: score -= 1
 
-    if buy_count >= 2:
-        return "buy", [f"{name}({detail})" for name, d, detail in signals if d == "buy"]
-    if sell_count >= 2:
-        return "sell", [f"{name}({detail})" for name, d, detail in signals if d == "sell"]
-    return None, []
+    # Yorum
+    rsi_str = f"RSI {rsi_val:.0f} ({'aşırı satım' if rsi_val < 35 else 'aşırı alım' if rsi_val > 65 else 'nötr'})"
+    bb_str = f"BB %{bb_pct:.0f} ({'alt bant' if bb_pct < 20 else 'üst bant' if bb_pct > 80 else 'orta'})"
+    macd_str = f"MACD {'yukarı' if macd_bull else 'aşağı'}"
+
+    if score >= 2:
+        zone = "buy"
+        yorum = f"Alım bölgesi: {rsi_str}, {bb_str}, {macd_str}."
+    elif score <= -2:
+        zone = "sell"
+        yorum = f"Satım bölgesi: {rsi_str}, {bb_str}, {macd_str}."
+    else:
+        zone = None
+        yorum = f"Nötr: {rsi_str}, {bb_str}, {macd_str}."
+
+    return zone, yorum
 
 
 def find_support_resistance(series, window=10, num_levels=3, tolerance=0.02):
@@ -263,6 +266,7 @@ for i, row in df.iterrows():
         name = row["Ad"]
         sup_str, res_str = "—", "—"
         zone_html = ""
+        yorum_html = ""
         if name in raw_close:
             series, _ = raw_close[name]
             if len(series) >= 25:
@@ -272,11 +276,13 @@ for i, row in df.iterrows():
                 if res_levels:
                     res_str = " / ".join(f"₺{v:.2f}" for v in res_levels[:2])
 
-                zone, indicators = zone_signal(series)
+            if len(series) >= 35:
+                zone, yorum = zone_signal(series)
                 if zone == "buy":
-                    zone_html = f"<span style='background:#22c55e;color:#fff;padding:1px 6px;border-radius:4px;font-size:0.75rem;'>Alım Bölgesi · {', '.join(indicators)}</span><br>"
+                    zone_html = "<span style='background:#22c55e;color:#fff;padding:1px 6px;border-radius:4px;font-size:0.75rem;'>Alım Bölgesi</span><br>"
                 elif zone == "sell":
-                    zone_html = f"<span style='background:#ef4444;color:#fff;padding:1px 6px;border-radius:4px;font-size:0.75rem;'>Satım Bölgesi · {', '.join(indicators)}</span><br>"
+                    zone_html = "<span style='background:#ef4444;color:#fff;padding:1px 6px;border-radius:4px;font-size:0.75rem;'>Satım Bölgesi</span><br>"
+                yorum_html = f"<span style='font-size:0.75rem;color:#aaa;'>{yorum}</span><br>"
 
         st.markdown(
             f"<p style='font-size:0.875rem; color:#888; margin-top:-12px; line-height:1.7;'>"
@@ -287,6 +293,7 @@ for i, row in df.iterrows():
             f"<span style='color:#ef4444;'>{res_str}</span><br>"
             f"<span style='color:#22c55e;'>{sup_str}</span><br>"
             f"{zone_html}"
+            f"{yorum_html}"
             f"</p>",
             unsafe_allow_html=True,
         )
