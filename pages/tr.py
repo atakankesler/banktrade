@@ -5,6 +5,36 @@ import plotly.graph_objects as go
 import plotly.express as px
 from datetime import date, timedelta
 
+
+def find_support_resistance(series, window=10, num_levels=3, tolerance=0.02):
+    resistance_pts, support_pts = [], []
+    for i in range(window, len(series) - window):
+        sl = series.iloc[i - window: i + window + 1]
+        if series.iloc[i] == sl.max():
+            resistance_pts.append(float(series.iloc[i]))
+        if series.iloc[i] == sl.min():
+            support_pts.append(float(series.iloc[i]))
+
+    def cluster(levels):
+        if not levels:
+            return []
+        levels = sorted(levels)
+        clusters, group = [], [levels[0]]
+        for lv in levels[1:]:
+            if (lv - group[0]) / group[0] < tolerance:
+                group.append(lv)
+            else:
+                clusters.append(sum(group) / len(group))
+                group = [lv]
+        clusters.append(sum(group) / len(group))
+        return clusters
+
+    current = float(series.iloc[-1])
+    res_levels = sorted([r for r in cluster(resistance_pts) if r > current * 0.98])[:num_levels]
+    sup_levels = sorted([s for s in cluster(support_pts) if s < current * 1.02], reverse=True)[:num_levels]
+    return sup_levels, res_levels
+
+
 TURKISH_BANKS = {
     "Garanti BBVA": "GARAN.IS",
     "Akbank": "AKBNK.IS",
@@ -116,6 +146,7 @@ if fetch_btn or "df_results" not in st.session_state:
 
             results = []
             price_data = {}
+            raw_close_data = {}
 
             for name, ticker in all_items.items():
                 if ticker not in close.columns:
@@ -144,9 +175,11 @@ if fetch_btn or "df_results" not in st.session_state:
 
                 normalized = (series / series.iloc[0] - 1) * 100
                 price_data[name] = (normalized, is_index)
+                raw_close_data[name] = (series, is_index)
 
             st.session_state["df_results"] = pd.DataFrame(results)
             st.session_state["price_data"] = price_data
+            st.session_state["raw_close"] = raw_close_data
 
         except Exception as e:
             st.error(f"Veri çekilirken hata oluştu: {e}")
@@ -154,6 +187,7 @@ if fetch_btn or "df_results" not in st.session_state:
 
 df = st.session_state.get("df_results", pd.DataFrame())
 price_data = st.session_state.get("price_data", {})
+raw_close = st.session_state.get("raw_close", {})
 
 if df.empty:
     st.info("Sol panelden tarih aralığı ve banka seçip 'Verileri Getir' butonuna basın.")
@@ -175,12 +209,26 @@ for i, row in df.iterrows():
             delta=f"{row['Artış / Düşüş (%)']:+.2f}%",
         )
         dist_from_high = ((row['Bitiş Değeri (₺)'] - row['En Yüksek (₺)']) / row['En Yüksek (₺)']) * 100
+
+        name = row["Ad"]
+        sup_str, res_str = "—", "—"
+        if name in raw_close:
+            series, _ = raw_close[name]
+            if len(series) >= 25:
+                sup_levels, res_levels = find_support_resistance(series)
+                if sup_levels:
+                    sup_str = " / ".join(f"₺{v:.2f}" for v in sup_levels[:2])
+                if res_levels:
+                    res_str = " / ".join(f"₺{v:.2f}" for v in res_levels[:2])
+
         st.markdown(
             f"<p style='font-size:0.875rem; color:#888; margin-top:-12px; line-height:1.7;'>"
             f"Başlangıç: ₺{row['Başlangıç Değeri (₺)']:.2f}<br>"
             f"En Yüksek: ₺{row['En Yüksek (₺)']:.2f}<br>"
             f"Tarih: {row['En Yüksek Tarih']}<br>"
-            f"Zirveden Uzaklık: {dist_from_high:+.2f}%"
+            f"Zirveden Uzaklık: {dist_from_high:+.2f}%<br>"
+            f"<span style='color:#ef4444;'>Direnç: {res_str}</span><br>"
+            f"<span style='color:#22c55e;'>Destek: {sup_str}</span>"
             f"</p>",
             unsafe_allow_html=True,
         )
