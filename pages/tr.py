@@ -4,6 +4,9 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 from datetime import date, timedelta
+from streamlit_autorefresh import st_autorefresh
+
+st_autorefresh(interval=60_000, key="autorefresh")
 
 
 def zone_signal(series):
