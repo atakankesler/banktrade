@@ -227,8 +227,8 @@ for i, row in df.iterrows():
             f"En Yüksek: ₺{row['En Yüksek (₺)']:.2f}<br>"
             f"Tarih: {row['En Yüksek Tarih']}<br>"
             f"Zirveden Uzaklık: {dist_from_high:+.2f}%<br>"
-            f"<span style='color:#ef4444;'>Direnç: {res_str}</span><br>"
-            f"<span style='color:#22c55e;'>Destek: {sup_str}</span>"
+            f"<span style='color:#ef4444;'>{res_str}</span><br>"
+            f"<span style='color:#22c55e;'>{sup_str}</span>"
             f"</p>",
             unsafe_allow_html=True,
         )
