@@ -6,6 +6,56 @@ import plotly.express as px
 from datetime import date, timedelta
 
 
+def zone_signal(series):
+    """RSI + Bollinger Bands + MACD ile alım/satım bölgesi tespiti.
+    En az 2/3 gösterge aynı yönü işaret ediyorsa sinyal üretir."""
+    if len(series) < 35:
+        return None, []
+
+    signals = []
+
+    # RSI (14)
+    delta = series.diff()
+    gain = delta.clip(lower=0).rolling(14).mean()
+    loss = (-delta.clip(upper=0)).rolling(14).mean()
+    rsi = 100 - (100 / (1 + gain / loss))
+    rsi_val = rsi.iloc[-1]
+    if rsi_val < 35:
+        signals.append(("RSI", "buy", f"{rsi_val:.0f}"))
+    elif rsi_val > 65:
+        signals.append(("RSI", "sell", f"{rsi_val:.0f}"))
+
+    # Bollinger Bands (20, 2σ)
+    sma = series.rolling(20).mean()
+    std = series.rolling(20).std()
+    upper_bb = sma + 2 * std
+    lower_bb = sma - 2 * std
+    current = series.iloc[-1]
+    if current < lower_bb.iloc[-1]:
+        signals.append(("BB", "buy", "alt bant"))
+    elif current > upper_bb.iloc[-1]:
+        signals.append(("BB", "sell", "üst bant"))
+
+    # MACD (12, 26, 9)
+    ema12 = series.ewm(span=12, adjust=False).mean()
+    ema26 = series.ewm(span=26, adjust=False).mean()
+    macd = ema12 - ema26
+    signal_line = macd.ewm(span=9, adjust=False).mean()
+    if macd.iloc[-1] > signal_line.iloc[-1] and macd.iloc[-2] <= signal_line.iloc[-2]:
+        signals.append(("MACD", "buy", "kesişim↑"))
+    elif macd.iloc[-1] < signal_line.iloc[-1] and macd.iloc[-2] >= signal_line.iloc[-2]:
+        signals.append(("MACD", "sell", "kesişim↓"))
+
+    buy_count = sum(1 for _, d, _ in signals if d == "buy")
+    sell_count = sum(1 for _, d, _ in signals if d == "sell")
+
+    if buy_count >= 2:
+        return "buy", [f"{name}({detail})" for name, d, detail in signals if d == "buy"]
+    if sell_count >= 2:
+        return "sell", [f"{name}({detail})" for name, d, detail in signals if d == "sell"]
+    return None, []
+
+
 def find_support_resistance(series, window=10, num_levels=3, tolerance=0.02):
     resistance_pts, support_pts = [], []
     for i in range(window, len(series) - window):
@@ -217,18 +267,16 @@ for i, row in df.iterrows():
             series, _ = raw_close[name]
             if len(series) >= 25:
                 sup_levels, res_levels = find_support_resistance(series)
-                current = float(series.iloc[-1])
                 if sup_levels:
                     sup_str = " / ".join(f"₺{v:.2f}" for v in sup_levels[:2])
                 if res_levels:
                     res_str = " / ".join(f"₺{v:.2f}" for v in res_levels[:2])
 
-                near_support = sup_levels and abs(current - sup_levels[0]) / sup_levels[0] <= 0.03
-                near_resistance = res_levels and abs(current - res_levels[0]) / res_levels[0] <= 0.03
-                if near_support:
-                    zone_html = "<span style='background:#22c55e;color:#fff;padding:1px 6px;border-radius:4px;font-size:0.75rem;'>Alım Bölgesi</span><br>"
-                elif near_resistance:
-                    zone_html = "<span style='background:#ef4444;color:#fff;padding:1px 6px;border-radius:4px;font-size:0.75rem;'>Satım Bölgesi</span><br>"
+                zone, indicators = zone_signal(series)
+                if zone == "buy":
+                    zone_html = f"<span style='background:#22c55e;color:#fff;padding:1px 6px;border-radius:4px;font-size:0.75rem;'>Alım Bölgesi · {', '.join(indicators)}</span><br>"
+                elif zone == "sell":
+                    zone_html = f"<span style='background:#ef4444;color:#fff;padding:1px 6px;border-radius:4px;font-size:0.75rem;'>Satım Bölgesi · {', '.join(indicators)}</span><br>"
 
         st.markdown(
             f"<p style='font-size:0.875rem; color:#888; margin-top:-12px; line-height:1.7;'>"
