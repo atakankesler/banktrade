@@ -9,8 +9,8 @@ from streamlit_autorefresh import st_autorefresh
 st_autorefresh(interval=60_000, key="autorefresh")
 
 
-def zone_signal(series):
-    """RSI + Bollinger Bands + MACD hesaplar, gösterge değerleri ve yorum döndürür."""
+def zone_signal(series, volume=None):
+    """RSI + Bollinger Bands + MACD + OBV hesaplar, gösterge değerleri ve yorum döndürür."""
     if len(series) < 35:
         return None, ""
 
@@ -35,6 +35,16 @@ def zone_signal(series):
     signal_line = macd.ewm(span=9, adjust=False).mean()
     macd_bull = macd.iloc[-1] > signal_line.iloc[-1]
 
+    # OBV
+    obv_bull = None
+    obv_str = ""
+    if volume is not None and len(volume) >= 20:
+        direction = series.diff().apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))
+        obv = (direction * volume).cumsum()
+        obv_sma = obv.rolling(20).mean()
+        obv_bull = float(obv.iloc[-1]) > float(obv_sma.iloc[-1])
+        obv_str = f"OBV {'yukarı' if obv_bull else 'aşağı'}"
+
     # Skorlama
     score = 0
     if rsi_val < 35: score += 1
@@ -43,23 +53,31 @@ def zone_signal(series):
     elif bb_pct > 80: score -= 1
     if macd_bull: score += 1
     else: score -= 1
+    if obv_bull is not None:
+        if obv_bull: score += 1
+        else: score -= 1
 
     # Yorum
     rsi_str = f"RSI {rsi_val:.0f} ({'aşırı satım' if rsi_val < 35 else 'aşırı alım' if rsi_val > 65 else 'nötr'})"
     bb_str = f"BB %{bb_pct:.0f} ({'alt bant' if bb_pct < 20 else 'üst bant' if bb_pct > 80 else 'orta'})"
     macd_str = f"MACD {'yukarı' if macd_bull else 'aşağı'}"
+    parts = [rsi_str, bb_str, macd_str]
+    if obv_str:
+        parts.append(obv_str)
+    detail = ", ".join(parts)
 
-    if score >= 2:
+    threshold = 2 if obv_bull is None else 3
+    if score >= threshold:
         zone = "buy"
-        yorum = f"Alım bölgesi: {rsi_str}, {bb_str}, {macd_str}."
-    elif score <= -2:
+        yorum = f"Alım bölgesi: {detail}."
+    elif score <= -threshold:
         zone = "sell"
-        yorum = f"Satım bölgesi: {rsi_str}, {bb_str}, {macd_str}."
+        yorum = f"Satım bölgesi: {detail}."
     else:
         zone = None
-        yorum = f"Nötr: {rsi_str}, {bb_str}, {macd_str}."
+        yorum = f"Nötr: {detail}."
 
-    return zone, yorum
+    return zone, yorum, score
 
 
 def find_support_resistance(series, window=10, num_levels=3, tolerance=0.02):
@@ -200,6 +218,10 @@ if fetch_btn or "df_results" not in st.session_state:
             if len(tickers) == 1:
                 close.columns = tickers
 
+            vol_raw = raw.get("Volume") if "Volume" in raw else None
+            if vol_raw is not None and len(tickers) == 1:
+                vol_raw = vol_raw.rename(columns={vol_raw.columns[0]: tickers[0]}) if hasattr(vol_raw, "columns") else None
+
             results = []
             price_data = {}
             raw_close_data = {}
@@ -231,7 +253,10 @@ if fetch_btn or "df_results" not in st.session_state:
 
                 normalized = (series / series.iloc[0] - 1) * 100
                 price_data[name] = (normalized, is_index)
-                raw_close_data[name] = (series, is_index)
+                vol_series = None
+                if vol_raw is not None and ticker in vol_raw.columns:
+                    vol_series = vol_raw[ticker].reindex(series.index)
+                raw_close_data[name] = (series, is_index, vol_series)
 
             st.session_state["df_results"] = pd.DataFrame(results)
             st.session_state["price_data"] = price_data
@@ -262,10 +287,10 @@ for i, row in df.iterrows():
         dist_from_high = ((row['Bitiş Değeri (₺)'] - row['En Yüksek (₺)']) / row['En Yüksek (₺)']) * 100
         name = row["Ad"]
         sup_str, res_str = "—", "—"
-        zone, yorum = None, ""
+        zone, yorum, sig_score = None, "", 0
 
         if name in raw_close:
-            series, _ = raw_close[name]
+            series, _, vol_series = raw_close[name]
             if len(series) >= 25:
                 sup_levels, res_levels = find_support_resistance(series)
                 if sup_levels:
@@ -273,17 +298,19 @@ for i, row in df.iterrows():
                 if res_levels:
                     res_str = " / ".join(f"₺{v:.2f}" for v in res_levels[:2])
             if len(series) >= 35:
-                zone, yorum = zone_signal(series)
+                zone, yorum, sig_score = zone_signal(series, volume=vol_series)
 
         delta_val = row['Artış / Düşüş (%)']
         delta_color = "#22c55e" if delta_val >= 0 else "#ef4444"
         delta_sign = "+" if delta_val >= 0 else ""
 
+        # Sinyal gücüne göre çerçeve kalınlığı: |score| 2→2px, 3→4px, 4→6px
+        border_width = {2: "2px", 3: "4px", 4: "6px"}.get(abs(sig_score), "1px")
         if zone == "buy":
-            border = "2px solid #22c55e"
+            border = f"{border_width} solid #22c55e"
             badge = "<span style='background:#22c55e;color:#fff;padding:1px 6px;border-radius:4px;font-size:0.75rem;'>Alım Bölgesi</span><br>"
         elif zone == "sell":
-            border = "2px solid #ef4444"
+            border = f"{border_width} solid #ef4444"
             badge = "<span style='background:#ef4444;color:#fff;padding:1px 6px;border-radius:4px;font-size:0.75rem;'>Satım Bölgesi</span><br>"
         else:
             border = "1px solid #333"
