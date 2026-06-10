@@ -66,11 +66,10 @@ def zone_signal(series, volume=None):
         parts.append(obv_str)
     detail = ", ".join(parts)
 
-    threshold = 2 if obv_bull is None else 3
-    if score >= threshold:
+    if score >= 2:
         zone = "buy"
         yorum = f"Alım bölgesi: {detail}."
-    elif score <= -threshold:
+    elif score <= -2:
         zone = "sell"
         yorum = f"Satım bölgesi: {detail}."
     else:
@@ -178,7 +177,7 @@ with st.sidebar:
         ["Çizgi Grafik", "Bar Grafik"],
     )
 
-    fetch_btn = st.button("📊 Verileri Getir", use_container_width=True, type="primary")
+    fetch_btn = st.button("📊 Verileri Getir", width="stretch", type="primary")
 
 selected_indices = {}
 if show_xbank:
@@ -372,7 +371,79 @@ else:
         height=400,
     )
 
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, width="stretch")
+
+# --- Normalize Açıklık Tablosu ---
+xu100_key = "BIST 100 (XU100)"
+xbank_key = "Bankacılık Endeksi (XBANK)"
+halkb_key = "Halkbank"
+
+gap_series = {}
+for key in [xu100_key, xbank_key, halkb_key]:
+    if key in price_data:
+        s, _ = price_data[key]
+        if hasattr(s.index, "tz") and s.index.tz is not None:
+            s = s.copy()
+            s.index = s.index.tz_localize(None)
+        gap_series[key] = s
+
+if xu100_key in gap_series and len(gap_series) >= 2:
+    # Ortak index
+    common_idx = gap_series[xu100_key].index
+    for _s in gap_series.values():
+        common_idx = common_idx.intersection(_s.index)
+
+    combined = pd.DataFrame({k: s.reindex(common_idx) for k, s in gap_series.items()})
+    combined.columns = [
+        "XU100" if c == xu100_key else "XBANK" if c == xbank_key else "HALKB"
+        for c in combined.columns
+    ]
+
+    if "XBANK" in combined.columns:
+        combined["XBANK−XU100"] = combined["XBANK"] - combined["XU100"]
+    if "HALKB" in combined.columns:
+        combined["HALKB−XU100"] = combined["HALKB"] - combined["XU100"]
+    if "XBANK" in combined.columns and "HALKB" in combined.columns:
+        combined["HALKB−XBANK"] = combined["HALKB"] - combined["XBANK"]
+
+    n_days = (common_idx[-1] - common_idx[0]).days
+    if n_days <= 30:
+        tbl = combined.copy()
+        freq_label = "Günlük"
+    elif n_days <= 180:
+        tbl = combined.resample("W").last()
+        freq_label = "Haftalık"
+    else:
+        tbl = combined.resample("ME").last()
+        freq_label = "Aylık"
+
+    tbl = tbl.dropna()
+
+    st.divider()
+    st.subheader(f"📐 Normalize Açıklık Karşılaştırması ({freq_label})")
+
+    gap_cols = [c for c in ["XBANK−XU100", "HALKB−XU100", "HALKB−XBANK"] if c in combined.columns]
+    metric_cols = st.columns(len(gap_cols) * 2)
+    for i, col in enumerate(gap_cols):
+        cur = float(combined[col].iloc[-1])
+        avg = float(combined[col].mean())
+        with metric_cols[i * 2]:
+            st.metric(f"{col} (Güncel)", f"{cur:+.2f}%")
+        with metric_cols[i * 2 + 1]:
+            st.metric(f"{col} (Ort.)", f"{avg:+.2f}%")
+
+    val_cols = [c for c in ["XU100", "XBANK", "HALKB"] if c in tbl.columns]
+    gap_cols_tbl = [c for c in gap_cols if c in tbl.columns]
+
+    gap_df = pd.DataFrame({"Tarih": tbl.index.strftime("%d.%m.%Y")})
+    for c in val_cols:
+        gap_df[f"{c} (%)"] = tbl[c].round(2)
+    for c in gap_cols_tbl:
+        gap_df[f"{c} (%)"] = tbl[c].round(2)
+
+    col_config = {f"{c} (%)": st.column_config.NumberColumn(format="%.2f%%") for c in val_cols + gap_cols_tbl}
+
+    st.dataframe(gap_df, hide_index=True, width="stretch", column_config=col_config)
 
 st.divider()
 
@@ -382,7 +453,7 @@ styled = df.copy()
 st.dataframe(
     styled,
     hide_index=True,
-    use_container_width=True,
+    width="stretch",
     column_config={
         "Artış / Düşüş (%)": st.column_config.NumberColumn(format="%.2f%%"),
         "Başlangıç Değeri (₺)": st.column_config.NumberColumn(format="₺%.2f"),
