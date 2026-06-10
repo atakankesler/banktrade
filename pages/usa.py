@@ -47,6 +47,9 @@ with st.sidebar:
     show_sp500 = st.checkbox("S&P 500", value=True)
     show_nasdaq = st.checkbox("NASDAQ Composite", value=True)
 
+    st.markdown("**Karşılaştırma**")
+    show_halkb = st.checkbox("Halkbank (HALKB.IS)", value=True)
+
     st.markdown("**Diğer Varlıklar**")
     selected_others = st.multiselect(
         "Varlık Seç",
@@ -74,7 +77,7 @@ with st.sidebar:
         ["Çizgi Grafik", "Bar Grafik"],
     )
 
-    fetch_btn = st.button("📊 Verileri Getir", use_container_width=True, type="primary")
+    fetch_btn = st.button("📊 Verileri Getir", width="stretch", type="primary")
 
 selected_indices = {}
 if show_sp500:
@@ -91,6 +94,9 @@ if not selected_stocks and not selected_indices and not selected_other_assets:
 if start_date >= end_date:
     st.error("Başlangıç tarihi, bitiş tarihinden önce olmalıdır.")
     st.stop()
+
+if show_halkb:
+    selected_other_assets["Halkbank"] = "HALKB.IS"
 
 if fetch_btn or "tech_df_results" not in st.session_state:
     all_items = {**{s: US_TECH_STOCKS[s] for s in selected_stocks}, **selected_indices, **selected_other_assets}
@@ -224,7 +230,78 @@ else:
         height=400,
     )
 
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, width="stretch")
+
+# --- NVIDIA vs HALKB Açıklık Tablosu ---
+_gap_candidates = {
+    "NVIDIA": "NVIDIA",
+    "HALKB": "Halkbank",
+}
+
+def _to_naive(s):
+    if getattr(s.index, "tz", None) is not None:
+        s = s.copy()
+        s.index = s.index.tz_convert(None)
+    return s
+
+_named = {
+    col: _to_naive(price_data[key][0]).rename(col)
+    for col, key in _gap_candidates.items()
+    if key in price_data
+}
+
+if "NVIDIA" in _named and "HALKB" in _named:
+    combined = pd.concat(_named.values(), axis=1, join="inner")
+    combined["HALKB-NVIDIA"] = combined["HALKB"] - combined["NVIDIA"]
+
+    n_days = (combined.index[-1] - combined.index[0]).days
+    if n_days <= 30:
+        tbl = combined.copy()
+        freq_label = "Günlük"
+    elif n_days <= 180:
+        tbl = combined.resample("W").last()
+        freq_label = "Haftalık"
+    else:
+        tbl = combined.resample("ME").last()
+        freq_label = "Aylık"
+
+    tbl = tbl.dropna(how="all")
+
+    st.divider()
+    st.subheader(f"📐 NVIDIA & HALKB Normalize Açıklık ({freq_label})")
+
+    cur = float(combined["HALKB-NVIDIA"].iloc[-1])
+    avg = float(combined["HALKB-NVIDIA"].mean())
+    mx = float(combined["HALKB-NVIDIA"].max())
+    mn = float(combined["HALKB-NVIDIA"].min())
+
+    m1, m2, m3, m4 = st.columns(4)
+    with m1:
+        st.metric("Güncel Açıklık", f"{cur:+.2f}%")
+    with m2:
+        st.metric("Ort. Açıklık", f"{avg:+.2f}%")
+    with m3:
+        st.metric("Maks. Açıklık", f"{mx:+.2f}%")
+    with m4:
+        st.metric("Min. Açıklık", f"{mn:+.2f}%")
+
+    gap_df = pd.DataFrame({
+        "Tarih": tbl.index.strftime("%d.%m.%Y"),
+        "NVIDIA (%)": tbl["NVIDIA"].round(2).values,
+        "HALKB (%)": tbl["HALKB"].round(2).values,
+        "HALKB-NVIDIA (%)": tbl["HALKB-NVIDIA"].round(2).values,
+    })
+
+    st.dataframe(
+        gap_df,
+        hide_index=True,
+        width="stretch",
+        column_config={
+            "NVIDIA (%)": st.column_config.NumberColumn(format="%.2f%%"),
+            "HALKB (%)": st.column_config.NumberColumn(format="%.2f%%"),
+            "HALKB-NVIDIA (%)": st.column_config.NumberColumn(format="%.2f%%"),
+        },
+    )
 
 st.divider()
 
@@ -234,7 +311,7 @@ styled = df.copy()
 st.dataframe(
     styled,
     hide_index=True,
-    use_container_width=True,
+    width="stretch",
     column_config={
         "Artış / Düşüş (%)": st.column_config.NumberColumn(format="%.2f%%"),
         "Başlangıç Değeri ($)": st.column_config.NumberColumn(format="$%.2f"),
