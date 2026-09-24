@@ -470,16 +470,22 @@ st.subheader("📊 Normalize Fiyat Değişimi (%)")
 def _build_tier_fig(names):
     if chart_type == "Çizgi Grafik":
         fig = go.Figure()
-        for name in names:
-            if name not in price_data:
-                continue
+        _names_in_data = [n for n in names if n in price_data]
+        _names_sorted = sorted(
+            _names_in_data,
+            key=lambda n: price_data[n][0].iloc[-1],
+            reverse=True,
+        )
+        for name in _names_sorted:
             series, is_index = price_data[name]
             is_halkb = name == "Halkbank"
             line_width = 5 if is_halkb else (3 if is_index else 1.5)
+            last_pct = float(series.iloc[-1])
+            legend_name = f"{name} ({last_pct:+.2f}%)"
             fig.add_trace(go.Scatter(
                 x=series.index,
                 y=series.values,
-                name=name,
+                name=legend_name,
                 mode="lines",
                 line=dict(width=line_width, dash="dash" if is_index else "solid"),
             ))
