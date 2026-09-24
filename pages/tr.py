@@ -6,7 +6,10 @@ import plotly.express as px
 from datetime import date, timedelta
 from streamlit_autorefresh import st_autorefresh
 
-st_autorefresh(interval=60_000, key="autorefresh")
+_refresh_count = st_autorefresh(interval=60_000, key="autorefresh")
+if _refresh_count > 0:
+    for _k in ["df_results", "price_data", "raw_close"]:
+        st.session_state.pop(_k, None)
 
 
 def zone_signal(series, volume=None):
@@ -108,17 +111,57 @@ def find_support_resistance(series, window=10, num_levels=3, tolerance=0.02):
     return sup_levels, res_levels
 
 
-TURKISH_BANKS = {
-    "Garanti BBVA": "GARAN.IS",
+BIST50_STOCKS = {
+    "Anadolu Efes": "AEFES.IS",
     "Akbank": "AKBNK.IS",
-    "İş Bankası": "ISCTR.IS",
-    "Yapı Kredi": "YKBNK.IS",
+    "Aksa Enerji": "AKSEN.IS",
+    "Alarko Holding": "ALARK.IS",
+    "Aselsan": "ASELS.IS",
+    "Astor Enerji": "ASTOR.IS",
+    "BİM Mağazalar": "BIMAS.IS",
+    "Borusan Boru": "BRSAN.IS",
+    "Batıçim": "BTCIM.IS",
+    "Can2 Termik": "CANTE.IS",
+    "Coca-Cola İçecek": "CCOLA.IS",
+    "Çimsa": "CIMSA.IS",
+    "Destek Faktoring": "DSTKF.IS",
+    "Eczacıbaşı İlaç": "ECILC.IS",
+    "Efor Çay": "EFOR.IS",
+    "Emlak Konut GYO": "EKGYO.IS",
+    "Enka İnşaat": "ENKAI.IS",
+    "Ereğli Demir Çelik": "EREGL.IS",
+    "Ford Otosan": "FROTO.IS",
+    "Garanti BBVA": "GARAN.IS",
+    "Gülermak": "GLRMK.IS",
+    "Gübre Fabrikaları": "GUBRF.IS",
     "Halkbank": "HALKB.IS",
+    "Hektaş": "HEKTS.IS",
+    "İş Bankası": "ISCTR.IS",
+    "Koç Holding": "KCHOL.IS",
+    "Kardemir": "KRDMD.IS",
+    "Katılımevim": "KTLEV.IS",
+    "Kuyaş Yatırım": "KUYAS.IS",
+    "Migros": "MGROS.IS",
+    "MIA Teknoloji": "MIATK.IS",
+    "Oyak Çimento": "OYAKC.IS",
+    "Pasifik Eurasia": "PASEU.IS",
+    "Petkim": "PETKM.IS",
+    "Pegasus": "PGSUS.IS",
+    "Sabancı Holding": "SAHOL.IS",
+    "Sasa Polyester": "SASA.IS",
+    "Şişe Cam": "SISE.IS",
+    "TAV Havalimanları": "TAVHL.IS",
+    "Turkcell": "TCELL.IS",
+    "Türk Hava Yolları": "THYAO.IS",
+    "Tofaş": "TOASO.IS",
+    "Türk Altın İşletmeleri": "TRALT.IS",
+    "TR Anadolu Metal": "TRMET.IS",
+    "Türk Telekom": "TTKOM.IS",
+    "Tüpraş": "TUPRS.IS",
+    "Türkiye Sigorta": "TURSG.IS",
+    "Ülker Bisküvi": "ULKER.IS",
     "Vakıfbank": "VAKBN.IS",
-    "TSKB": "TSKB.IS",
-    "Albaraka Türk": "ALBRK.IS",
-    "QNB Finansbank": "QNBFB.IS",
-    "Şekerbank": "SKBNK.IS",
+    "Yapı Kredi": "YKBNK.IS",
 }
 
 INDICES = {
@@ -134,16 +177,16 @@ OTHER_ASSETS = {
     "Euro / TL": "EURTRY=X",
 }
 
-st.title("🏦 Türk Bankaları Hisse Artış Oranları")
+st.title("📈 BIST 50 Hisse Artış Oranları")
 st.markdown("Yahoo Finance verilerini kullanarak seçilen tarih aralığındaki hisse performansını gösterir.")
 
 with st.sidebar:
     st.header("⚙️ Ayarlar")
 
-    selected_banks = st.multiselect(
-        "Bankalar",
-        options=list(TURKISH_BANKS.keys()),
-        default=list(TURKISH_BANKS.keys())[:5],
+    selected_stocks = st.multiselect(
+        "BIST 50",
+        options=list(BIST50_STOCKS.keys()),
+        default=list(BIST50_STOCKS.keys()),
     )
 
     st.markdown("**Endeksler**")
@@ -187,8 +230,8 @@ if show_xu100:
 
 selected_other_assets = {k: OTHER_ASSETS[k] for k in selected_others}
 
-if not selected_banks and not selected_indices and not selected_other_assets:
-    st.warning("Lütfen en az bir banka veya endeks seçin.")
+if not selected_stocks and not selected_indices and not selected_other_assets:
+    st.warning("Lütfen en az bir hisse veya endeks seçin.")
     st.stop()
 
 if start_date >= end_date:
@@ -196,7 +239,7 @@ if start_date >= end_date:
     st.stop()
 
 if fetch_btn or "df_results" not in st.session_state:
-    all_items = {**{b: TURKISH_BANKS[b] for b in selected_banks}, **selected_indices, **selected_other_assets}
+    all_items = {**{b: BIST50_STOCKS[b] for b in selected_stocks}, **selected_indices, **selected_other_assets}
     tickers = list(all_items.values())
 
     with st.spinner("Veriler Yahoo Finance'den çekiliyor..."):
@@ -280,98 +323,166 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 st.subheader("📈 Özet")
-cols = st.columns(len(df))
-for i, row in df.iterrows():
-    with cols[i]:
-        dist_from_high = ((row['Bitiş Değeri (₺)'] - row['En Yüksek (₺)']) / row['En Yüksek (₺)']) * 100
-        name = row["Ad"]
-        sup_str, res_str = "—", "—"
-        zone, yorum, sig_score = None, "", 0
+CARDS_PER_ROW = 5
+_halkb_mask = df["Ad"] == "Halkbank"
+_rest_sorted = df[~_halkb_mask].sort_values("Artış / Düşüş (%)", ascending=False)
+df_ozet = pd.concat([df[_halkb_mask], _rest_sorted], ignore_index=True)
+card_rows = [df_ozet.iloc[i:i + CARDS_PER_ROW] for i in range(0, len(df_ozet), CARDS_PER_ROW)]
+for card_row in card_rows:
+    cols = st.columns(CARDS_PER_ROW)
+    for col, (_, row) in zip(cols, card_row.iterrows()):
+        with col:
+            dist_from_high = ((row['Bitiş Değeri (₺)'] - row['En Yüksek (₺)']) / row['En Yüksek (₺)']) * 100
+            name = row["Ad"]
+            sup_str, res_str = "—", "—"
+            zone, yorum, sig_score = None, "", 0
 
-        if name in raw_close:
-            series, _, vol_series = raw_close[name]
-            if len(series) >= 25:
-                sup_levels, res_levels = find_support_resistance(series)
-                if sup_levels:
-                    sup_str = " / ".join(f"₺{v:.2f}" for v in sup_levels[:2])
-                if res_levels:
-                    res_str = " / ".join(f"₺{v:.2f}" for v in res_levels[:2])
-            if len(series) >= 35:
-                zone, yorum, sig_score = zone_signal(series, volume=vol_series)
+            if name in raw_close:
+                series, _, vol_series = raw_close[name]
+                if len(series) >= 25:
+                    sup_levels, res_levels = find_support_resistance(series)
+                    if sup_levels:
+                        sup_str = " / ".join(f"₺{v:.2f}" for v in sup_levels[:2])
+                    if res_levels:
+                        res_str = " / ".join(f"₺{v:.2f}" for v in res_levels[:2])
+                if len(series) >= 35:
+                    zone, yorum, sig_score = zone_signal(series, volume=vol_series)
 
-        delta_val = row['Artış / Düşüş (%)']
-        delta_color = "#22c55e" if delta_val >= 0 else "#ef4444"
-        delta_sign = "+" if delta_val >= 0 else ""
+            delta_val = row['Artış / Düşüş (%)']
+            delta_color = "#22c55e" if delta_val >= 0 else "#ef4444"
+            delta_sign = "+" if delta_val >= 0 else ""
 
-        # Sinyal gücüne göre çerçeve kalınlığı: |score| 2→2px, 3→4px, 4→6px
-        border_width = {2: "2px", 3: "4px", 4: "6px"}.get(abs(sig_score), "1px")
-        if zone == "buy":
-            border = f"{border_width} solid #22c55e"
-            badge = "<span style='background:#22c55e;color:#fff;padding:1px 6px;border-radius:4px;font-size:0.75rem;'>Alım Bölgesi</span><br>"
-        elif zone == "sell":
-            border = f"{border_width} solid #ef4444"
-            badge = "<span style='background:#ef4444;color:#fff;padding:1px 6px;border-radius:4px;font-size:0.75rem;'>Satım Bölgesi</span><br>"
-        else:
-            border = "1px solid #333"
-            badge = ""
+            # Sinyal gücüne göre çerçeve kalınlığı: |score| 2→2px, 3→4px, 4→6px
+            border_width = {2: "2px", 3: "4px", 4: "6px"}.get(abs(sig_score), "1px")
+            if zone == "buy":
+                border = f"{border_width} solid #22c55e"
+                card_bg = "background:rgba(34,197,94,0.18);"
+                badge = "<span style='background:#22c55e;color:#fff;padding:1px 6px;border-radius:4px;font-size:0.75rem;'>Alım Bölgesi</span><br>"
+            elif zone == "sell":
+                border = f"{border_width} solid #ef4444"
+                card_bg = ""
+                badge = "<span style='background:#ef4444;color:#fff;padding:1px 6px;border-radius:4px;font-size:0.75rem;'>Satım Bölgesi</span><br>"
+            else:
+                border = "1px solid #333"
+                card_bg = ""
+                badge = ""
 
-        st.markdown(
-            f"<div style='border:{border};border-radius:10px;padding:12px 14px;margin-bottom:4px;'>"
-            f"<div style='font-size:0.8rem;color:#aaa;margin-bottom:2px;'>{name}</div>"
-            f"<div style='font-size:1.35rem;font-weight:700;'>₺{row['Bitiş Değeri (₺)']:.2f}</div>"
-            f"<div style='color:{delta_color};font-size:0.9rem;font-weight:600;margin-bottom:6px;'>{delta_sign}{delta_val:.2f}%</div>"
-            f"<div style='font-size:0.8rem;color:#888;line-height:1.8;'>"
-            f"Başlangıç: ₺{row['Başlangıç Değeri (₺)']:.2f}<br>"
-            f"En Yüksek: ₺{row['En Yüksek (₺)']:.2f} ({row['En Yüksek Tarih']})<br>"
-            f"Zirveden: {dist_from_high:+.2f}%<br>"
-            f"<span style='color:#ef4444;'>{res_str}</span><br>"
-            f"<span style='color:#22c55e;'>{sup_str}</span><br>"
-            f"{badge}"
-            f"<span style='font-size:0.72rem;color:#666;'>{yorum}</span>"
-            f"</div></div>",
-            unsafe_allow_html=True,
-        )
+            st.markdown(
+                f"<div style='border:{border};{card_bg}border-radius:10px;padding:12px 14px;margin-bottom:4px;'>"
+                f"<div style='font-size:0.8rem;color:#aaa;margin-bottom:2px;'>{name}</div>"
+                f"<div style='font-size:1.35rem;font-weight:700;'>₺{row['Bitiş Değeri (₺)']:.2f}</div>"
+                f"<div style='color:{delta_color};font-size:0.9rem;font-weight:600;margin-bottom:6px;'>{delta_sign}{delta_val:.2f}%</div>"
+                f"<div style='font-size:0.8rem;color:#888;line-height:1.8;'>"
+                f"Başlangıç: ₺{row['Başlangıç Değeri (₺)']:.2f}<br>"
+                f"En Yüksek: ₺{row['En Yüksek (₺)']:.2f} ({row['En Yüksek Tarih']})<br>"
+                f"Zirveden: {dist_from_high:+.2f}%<br>"
+                f"<span style='color:#ef4444;'>{res_str}</span><br>"
+                f"<span style='color:#22c55e;'>{sup_str}</span><br>"
+                f"{badge}"
+                f"<span style='font-size:0.72rem;color:#666;'>{yorum}</span>"
+                f"</div></div>",
+                unsafe_allow_html=True,
+            )
 
 st.divider()
 
 # --- Grafik ---
 st.subheader("📊 Normalize Fiyat Değişimi (%)")
 
-if chart_type == "Çizgi Grafik":
-    fig = go.Figure()
-    for name, (series, is_index) in price_data.items():
-        fig.add_trace(go.Scatter(
-            x=series.index,
-            y=series.values,
-            name=name,
-            mode="lines",
-            line=dict(width=3 if is_index else 1.5, dash="dash" if is_index else "solid"),
-        ))
-    fig.update_layout(
-        xaxis_title="Tarih",
-        yaxis_title="Değişim (%)",
-        hovermode="x unified",
-        height=450,
-        yaxis=dict(ticksuffix="%"),
-    )
-else:
-    bar_df = df.sort_values("Artış / Düşüş (%)", ascending=True)
-    colors = ["#ef4444" if v < 0 else "#22c55e" for v in bar_df["Artış / Düşüş (%)"]]
-    fig = go.Figure(go.Bar(
-        x=bar_df["Artış / Düşüş (%)"],
-        y=bar_df["Ad"],
-        orientation="h",
-        marker_color=colors,
-        text=[f"{v:+.2f}%" for v in bar_df["Artış / Düşüş (%)"]],
-        textposition="outside",
-    ))
-    fig.update_layout(
-        xaxis_title="Artış / Düşüş (%)",
-        xaxis=dict(ticksuffix="%"),
-        height=400,
-    )
 
-st.plotly_chart(fig, width="stretch")
+def _build_tier_fig(names):
+    if chart_type == "Çizgi Grafik":
+        fig = go.Figure()
+        for name in names:
+            if name not in price_data:
+                continue
+            series, is_index = price_data[name]
+            is_halkb = name == "Halkbank"
+            line_width = 5 if is_halkb else (3 if is_index else 1.5)
+            fig.add_trace(go.Scatter(
+                x=series.index,
+                y=series.values,
+                name=name,
+                mode="lines",
+                line=dict(width=line_width, dash="dash" if is_index else "solid"),
+            ))
+        fig.update_layout(
+            xaxis_title="Tarih",
+            yaxis_title="Değişim (%)",
+            hovermode="x unified",
+            height=450,
+            yaxis=dict(ticksuffix="%"),
+        )
+    else:
+        bar_df = df[df["Ad"].isin(names)].sort_values("Artış / Düşüş (%)", ascending=True)
+        colors = ["#ef4444" if v < 0 else "#22c55e" for v in bar_df["Artış / Düşüş (%)"]]
+        fig = go.Figure(go.Bar(
+            x=bar_df["Artış / Düşüş (%)"],
+            y=bar_df["Ad"],
+            orientation="h",
+            marker_color=colors,
+            text=[f"{v:+.2f}%" for v in bar_df["Artış / Düşüş (%)"]],
+            textposition="outside",
+        ))
+        fig.update_layout(
+            xaxis_title="Artış / Düşüş (%)",
+            xaxis=dict(ticksuffix="%"),
+            height=400,
+        )
+    return fig
+
+
+def _split_outliers(names):
+    """IQR yöntemiyle diğerlerinden çok ayrışan varlıkları ayırır, (ana_liste, aykırı_liste) döndürür."""
+    if len(names) < 4:
+        return names, []
+    vals = df.set_index("Ad").loc[names, "Artış / Düşüş (%)"]
+    q1, q3 = vals.quantile(0.25), vals.quantile(0.75)
+    iqr = q3 - q1
+    if iqr == 0:
+        return names, []
+    lower_fence = q1 - 1.5 * iqr
+    upper_fence = q3 + 1.5 * iqr
+    outlier_names = vals[(vals < lower_fence) | (vals > upper_fence)].index.tolist()
+    if not outlier_names:
+        return names, []
+    main_names = [n for n in names if n not in outlier_names]
+    return main_names, outlier_names
+
+
+_NUM_TIERS = 5
+_TIER_CAP = 12
+
+_ranked = df.sort_values("Artış / Düşüş (%)", ascending=False).reset_index(drop=True)
+_n = len(_ranked)
+_base, _extra = divmod(_n, _NUM_TIERS)
+_tier_sizes = [min(_base + (1 if i < _extra else 0), _TIER_CAP) for i in range(_NUM_TIERS)]
+_tier_names = []
+_idx = 0
+for _size in _tier_sizes:
+    _tier_names.append(_ranked["Ad"].iloc[_idx:_idx + _size].tolist())
+    _idx += _size
+if _idx < _n:
+    _tier_names[-1].extend(_ranked["Ad"].iloc[_idx:].tolist())
+
+_tier_labels = [
+    "🚀 En Fazla Yükselenler",
+    "📈 Yüksek Yükselenler",
+    "📊 Normal Yükselenler",
+    "📉 Düşük Yükselenler",
+    "🐢 En Az Yükselenler",
+]
+_tabs = st.tabs(_tier_labels)
+for _tab, _names in zip(_tabs, _tier_names):
+    with _tab:
+        if not _names:
+            st.info("Bu kategoride varlık yok.")
+            continue
+        _main_names, _outlier_names = _split_outliers(_names)
+        st.plotly_chart(_build_tier_fig(_main_names), width="stretch")
+        if _outlier_names:
+            st.caption(f"⚡ Diğerlerinden belirgin şekilde ayrışan ({', '.join(_outlier_names)}) ayrı grafikte gösteriliyor:")
+            st.plotly_chart(_build_tier_fig(_outlier_names), width="stretch")
 
 # --- Normalize Açıklık Tablosu ---
 _gap_candidates = {

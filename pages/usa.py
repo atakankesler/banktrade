@@ -3,6 +3,12 @@ import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import date, timedelta
+from streamlit_autorefresh import st_autorefresh
+
+_refresh_count = st_autorefresh(interval=60_000, key="usa_autorefresh")
+if _refresh_count > 0:
+    for _k in ["tech_df_results", "tech_price_data"]:
+        st.session_state.pop(_k, None)
 
 US_TECH_STOCKS = {
     "Apple": "AAPL",
