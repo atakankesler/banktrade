@@ -435,8 +435,9 @@ if "XU100" in _named and len(_named) >= 2:
         avg = float(combined[col].mean())
         cur_suffix = ""
         if col == "HALKB-XBANK":
+            mx = float(combined[col].max())
             max_date = combined[col].idxmax().strftime("%d.%m.%Y")
-            cur_suffix = f" ({max_date})"
+            cur_suffix = f" ({max_date} {mx:+.2f}%)"
         with metric_cols[i * 2]:
             st.metric(f"{col} (Güncel)", f"{cur:+.2f}%{cur_suffix}")
         with metric_cols[i * 2 + 1]:
