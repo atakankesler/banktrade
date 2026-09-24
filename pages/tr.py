@@ -384,6 +384,72 @@ if df.empty:
     st.info("Sol panelden tarih aralığı ve banka seçip 'Verileri Getir' butonuna basın.")
     st.stop()
 
+# --- Normalize Açıklık Tablosu ---
+_gap_candidates = {
+    "XU100": "BIST 100 (XU100)",
+    "XBANK": "Bankacılık Endeksi (XBANK)",
+    "HALKB": "Halkbank",
+}
+
+def _to_naive(s):
+    if getattr(s.index, "tz", None) is not None:
+        s = s.copy()
+        s.index = s.index.tz_convert(None)
+    return s
+
+_named = {
+    col: _to_naive(price_data[key][0]).rename(col)
+    for col, key in _gap_candidates.items()
+    if key in price_data
+}
+
+if "XU100" in _named and len(_named) >= 2:
+    combined = pd.concat(_named.values(), axis=1, join="inner")
+
+    if "XBANK" in combined.columns:
+        combined["XBANK-XU100"] = combined["XBANK"] - combined["XU100"]
+    if "HALKB" in combined.columns:
+        combined["HALKB-XU100"] = combined["HALKB"] - combined["XU100"]
+    if "XBANK" in combined.columns and "HALKB" in combined.columns:
+        combined["HALKB-XBANK"] = combined["HALKB"] - combined["XBANK"]
+
+    n_days = (combined.index[-1] - combined.index[0]).days
+    if n_days <= 30:
+        tbl = combined.copy()
+        freq_label = "Günlük"
+    elif n_days <= 180:
+        tbl = combined.resample("W").last()
+        freq_label = "Haftalık"
+    else:
+        tbl = combined.resample("ME").last()
+        freq_label = "Aylık"
+
+    tbl = tbl.dropna(how="all")
+
+    st.subheader(f"📐 Normalize Açıklık Karşılaştırması ({freq_label})")
+
+    gap_col_names = [c for c in ["XBANK-XU100", "HALKB-XU100", "HALKB-XBANK"] if c in combined.columns]
+    metric_cols = st.columns(len(gap_col_names) * 2)
+    for i, col in enumerate(gap_col_names):
+        cur = float(combined[col].iloc[-1])
+        avg = float(combined[col].mean())
+        with metric_cols[i * 2]:
+            st.metric(f"{col} (Güncel)", f"{cur:+.2f}%")
+        with metric_cols[i * 2 + 1]:
+            st.metric(f"{col} (Ort.)", f"{avg:+.2f}%")
+
+    val_cols = [c for c in ["XU100", "XBANK", "HALKB"] if c in tbl.columns]
+    gap_cols_tbl = [c for c in gap_col_names if c in tbl.columns]
+
+    gap_df = pd.DataFrame({"Tarih": tbl.index.strftime("%d.%m.%Y")})
+    for c in val_cols + gap_cols_tbl:
+        gap_df[f"{c} (%)"] = tbl[c].round(2).values
+
+    col_config = {f"{c} (%)": st.column_config.NumberColumn(format="%.2f%%") for c in val_cols + gap_cols_tbl}
+
+    st.dataframe(gap_df, hide_index=True, width="stretch", column_config=col_config)
+    st.divider()
+
 # --- Özet Kartlar ---
 st.markdown("""
 <style>
@@ -566,72 +632,6 @@ for _tab, _names in zip(_tabs, _tier_names):
         if _outlier_names:
             st.caption(f"⚡ Diğerlerinden belirgin şekilde ayrışan ({', '.join(_outlier_names)}) ayrı grafikte gösteriliyor:")
             st.plotly_chart(_build_tier_fig(_outlier_names), width="stretch")
-
-# --- Normalize Açıklık Tablosu ---
-_gap_candidates = {
-    "XU100": "BIST 100 (XU100)",
-    "XBANK": "Bankacılık Endeksi (XBANK)",
-    "HALKB": "Halkbank",
-}
-
-def _to_naive(s):
-    if getattr(s.index, "tz", None) is not None:
-        s = s.copy()
-        s.index = s.index.tz_convert(None)
-    return s
-
-_named = {
-    col: _to_naive(price_data[key][0]).rename(col)
-    for col, key in _gap_candidates.items()
-    if key in price_data
-}
-
-if "XU100" in _named and len(_named) >= 2:
-    combined = pd.concat(_named.values(), axis=1, join="inner")
-
-    if "XBANK" in combined.columns:
-        combined["XBANK-XU100"] = combined["XBANK"] - combined["XU100"]
-    if "HALKB" in combined.columns:
-        combined["HALKB-XU100"] = combined["HALKB"] - combined["XU100"]
-    if "XBANK" in combined.columns and "HALKB" in combined.columns:
-        combined["HALKB-XBANK"] = combined["HALKB"] - combined["XBANK"]
-
-    n_days = (combined.index[-1] - combined.index[0]).days
-    if n_days <= 30:
-        tbl = combined.copy()
-        freq_label = "Günlük"
-    elif n_days <= 180:
-        tbl = combined.resample("W").last()
-        freq_label = "Haftalık"
-    else:
-        tbl = combined.resample("ME").last()
-        freq_label = "Aylık"
-
-    tbl = tbl.dropna(how="all")
-
-    st.divider()
-    st.subheader(f"📐 Normalize Açıklık Karşılaştırması ({freq_label})")
-
-    gap_col_names = [c for c in ["XBANK-XU100", "HALKB-XU100", "HALKB-XBANK"] if c in combined.columns]
-    metric_cols = st.columns(len(gap_col_names) * 2)
-    for i, col in enumerate(gap_col_names):
-        cur = float(combined[col].iloc[-1])
-        avg = float(combined[col].mean())
-        with metric_cols[i * 2]:
-            st.metric(f"{col} (Güncel)", f"{cur:+.2f}%")
-        with metric_cols[i * 2 + 1]:
-            st.metric(f"{col} (Ort.)", f"{avg:+.2f}%")
-
-    val_cols = [c for c in ["XU100", "XBANK", "HALKB"] if c in tbl.columns]
-    gap_cols_tbl = [c for c in gap_col_names if c in tbl.columns]
-
-    gap_df = pd.DataFrame({"Tarih": tbl.index.strftime("%d.%m.%Y")})
-    for c in val_cols + gap_cols_tbl:
-        gap_df[f"{c} (%)"] = tbl[c].round(2).values
-
-    col_config = {f"{c} (%)": st.column_config.NumberColumn(format="%.2f%%") for c in val_cols + gap_cols_tbl}
-
-    st.dataframe(gap_df, hide_index=True, width="stretch", column_config=col_config)
 
 st.divider()
 
