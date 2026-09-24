@@ -434,12 +434,13 @@ if "XU100" in _named and len(_named) >= 2:
         cur = float(combined[col].iloc[-1])
         avg = float(combined[col].mean())
         cur_suffix = ""
+        max_date = None
         if col == "HALKB-XBANK":
             mx = float(combined[col].max())
             max_date = combined[col].idxmax().strftime("%d.%m.%Y")
-            cur_suffix = f" ({max_date} {mx:+.2f}%)"
+            cur_suffix = f" ({mx:+.2f}%)"
         with metric_cols[i * 2]:
-            st.metric(f"{col} (Güncel)", f"{cur:+.2f}%{cur_suffix}")
+            st.metric(f"{col} (Güncel)", f"{cur:+.2f}%{cur_suffix}", delta=max_date, delta_color="off")
         with metric_cols[i * 2 + 1]:
             st.metric(f"{col} (Ort.)", f"{avg:+.2f}%")
 
