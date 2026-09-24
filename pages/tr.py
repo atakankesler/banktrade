@@ -433,14 +433,14 @@ if "XU100" in _named and len(_named) >= 2:
     for i, col in enumerate(gap_col_names):
         cur = float(combined[col].iloc[-1])
         avg = float(combined[col].mean())
-        max_suffix = ""
+        cur_suffix = ""
         if col == "HALKB-XBANK":
-            mx = float(combined[col].max())
-            max_suffix = f" (max {mx:+.2f}%)"
+            max_date = combined[col].idxmax().strftime("%d.%m.%Y")
+            cur_suffix = f" ({max_date})"
         with metric_cols[i * 2]:
-            st.metric(f"{col} (Güncel)", f"{cur:+.2f}%{max_suffix}")
+            st.metric(f"{col} (Güncel)", f"{cur:+.2f}%{cur_suffix}")
         with metric_cols[i * 2 + 1]:
-            st.metric(f"{col} (Ort.)", f"{avg:+.2f}%{max_suffix}")
+            st.metric(f"{col} (Ort.)", f"{avg:+.2f}%")
 
     val_cols = [c for c in ["XU100", "XBANK", "HALKB"] if c in tbl.columns]
     gap_cols_tbl = [c for c in gap_col_names if c in tbl.columns]
