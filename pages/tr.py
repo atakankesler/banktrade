@@ -12,8 +12,31 @@ if _refresh_count > 0:
         st.session_state.pop(_k, None)
 
 
-def zone_signal(series, volume=None):
-    """RSI + Bollinger Bands + MACD + OBV hesaplar, gösterge değerleri ve yorum döndürür."""
+def _calc_adx(high, low, close, period=14):
+    """ADX, +DI, -DI hesaplar (Wilder yumuşatması)."""
+    up_move = high.diff()
+    down_move = -low.diff()
+    plus_dm = up_move.where((up_move > down_move) & (up_move > 0), 0.0)
+    minus_dm = down_move.where((down_move > up_move) & (down_move > 0), 0.0)
+
+    prev_close = close.shift()
+    tr = pd.concat([
+        high - low,
+        (high - prev_close).abs(),
+        (low - prev_close).abs(),
+    ], axis=1).max(axis=1)
+
+    atr = tr.ewm(alpha=1 / period, adjust=False).mean()
+    plus_di = 100 * plus_dm.ewm(alpha=1 / period, adjust=False).mean() / atr
+    minus_di = 100 * minus_dm.ewm(alpha=1 / period, adjust=False).mean() / atr
+
+    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di)
+    adx = dx.ewm(alpha=1 / period, adjust=False).mean()
+    return adx, plus_di, minus_di
+
+
+def zone_signal(series, volume=None, high=None, low=None):
+    """RSI + Bollinger Bands + MACD + OBV + ADX + SMA50/200 hesaplar, gösterge değerleri ve yorum döndürür."""
     if len(series) < 35:
         return None, ""
 
@@ -48,6 +71,29 @@ def zone_signal(series, volume=None):
         obv_bull = float(obv.iloc[-1]) > float(obv_sma.iloc[-1])
         obv_str = f"OBV {'yukarı' if obv_bull else 'aşağı'}"
 
+    # ADX (14) + DI — trend gücü yeterliyse (ADX>20) yön oyunu skora katar
+    adx_bull = None
+    adx_str = ""
+    if high is not None and low is not None and len(high.dropna()) >= 30 and len(low.dropna()) >= 30:
+        adx, plus_di, minus_di = _calc_adx(high, low, series, period=14)
+        adx_val = float(adx.iloc[-1])
+        plus_di_val = float(plus_di.iloc[-1])
+        minus_di_val = float(minus_di.iloc[-1])
+        if pd.notna(adx_val) and pd.notna(plus_di_val) and pd.notna(minus_di_val):
+            trend_desc = "güçlü trend" if adx_val > 25 else "zayıf trend" if adx_val < 20 else "orta trend"
+            adx_str = f"ADX {adx_val:.0f} ({trend_desc}, {'+DI üstte' if plus_di_val > minus_di_val else '-DI üstte'})"
+            if adx_val > 20:
+                adx_bull = plus_di_val > minus_di_val
+
+    # SMA 50/200 — Golden Cross (boğa) / Death Cross (ayı)
+    sma_cross_bull = None
+    sma_str = ""
+    if len(series) >= 200:
+        sma50 = float(series.rolling(50).mean().iloc[-1])
+        sma200 = float(series.rolling(200).mean().iloc[-1])
+        sma_cross_bull = sma50 > sma200
+        sma_str = f"SMA50/200 {'Golden Cross' if sma_cross_bull else 'Death Cross'}"
+
     # Skorlama
     score = 0
     if rsi_val < 35: score += 1
@@ -59,6 +105,12 @@ def zone_signal(series, volume=None):
     if obv_bull is not None:
         if obv_bull: score += 1
         else: score -= 1
+    if adx_bull is not None:
+        if adx_bull: score += 1
+        else: score -= 1
+    if sma_cross_bull is not None:
+        if sma_cross_bull: score += 1
+        else: score -= 1
 
     # Yorum
     rsi_str = f"RSI {rsi_val:.0f} ({'aşırı satım' if rsi_val < 35 else 'aşırı alım' if rsi_val > 65 else 'nötr'})"
@@ -67,6 +119,10 @@ def zone_signal(series, volume=None):
     parts = [rsi_str, bb_str, macd_str]
     if obv_str:
         parts.append(obv_str)
+    if adx_str:
+        parts.append(adx_str)
+    if sma_str:
+        parts.append(sma_str)
     detail = ", ".join(parts)
 
     if score >= 2:
@@ -124,7 +180,6 @@ BIST50_STOCKS = {
     "Can2 Termik": "CANTE.IS",
     "Coca-Cola İçecek": "CCOLA.IS",
     "Çimsa": "CIMSA.IS",
-    "Destek Faktoring": "DSTKF.IS",
     "Eczacıbaşı İlaç": "ECILC.IS",
     "Efor Çay": "EFOR.IS",
     "Emlak Konut GYO": "EKGYO.IS",
@@ -139,7 +194,6 @@ BIST50_STOCKS = {
     "İş Bankası": "ISCTR.IS",
     "Koç Holding": "KCHOL.IS",
     "Kardemir": "KRDMD.IS",
-    "Katılımevim": "KTLEV.IS",
     "Kuyaş Yatırım": "KUYAS.IS",
     "Migros": "MGROS.IS",
     "MIA Teknoloji": "MIATK.IS",
@@ -264,6 +318,14 @@ if fetch_btn or "df_results" not in st.session_state:
             if vol_raw is not None and len(tickers) == 1:
                 vol_raw = vol_raw.rename(columns={vol_raw.columns[0]: tickers[0]}) if hasattr(vol_raw, "columns") else None
 
+            high_raw = raw.get("High") if "High" in raw else None
+            if high_raw is not None and len(tickers) == 1:
+                high_raw = high_raw.rename(columns={high_raw.columns[0]: tickers[0]}) if hasattr(high_raw, "columns") else None
+
+            low_raw = raw.get("Low") if "Low" in raw else None
+            if low_raw is not None and len(tickers) == 1:
+                low_raw = low_raw.rename(columns={low_raw.columns[0]: tickers[0]}) if hasattr(low_raw, "columns") else None
+
             results = []
             price_data = {}
             raw_close_data = {}
@@ -298,7 +360,13 @@ if fetch_btn or "df_results" not in st.session_state:
                 vol_series = None
                 if vol_raw is not None and ticker in vol_raw.columns:
                     vol_series = vol_raw[ticker].reindex(series.index)
-                raw_close_data[name] = (series, is_index, vol_series)
+                high_series = None
+                if high_raw is not None and ticker in high_raw.columns:
+                    high_series = high_raw[ticker].reindex(series.index)
+                low_series = None
+                if low_raw is not None and ticker in low_raw.columns:
+                    low_series = low_raw[ticker].reindex(series.index)
+                raw_close_data[name] = (series, is_index, vol_series, high_series, low_series)
 
             st.session_state["df_results"] = pd.DataFrame(results)
             st.session_state["price_data"] = price_data
@@ -337,8 +405,11 @@ for card_row in card_rows:
             sup_str, res_str = "—", "—"
             zone, yorum, sig_score = None, "", 0
 
+            daily_pct = None
             if name in raw_close:
-                series, _, vol_series = raw_close[name]
+                series, _, vol_series, high_series, low_series = raw_close[name]
+                if len(series) >= 2:
+                    daily_pct = float((series.iloc[-1] - series.iloc[-2]) / series.iloc[-2] * 100)
                 if len(series) >= 25:
                     sup_levels, res_levels = find_support_resistance(series)
                     if sup_levels:
@@ -346,14 +417,20 @@ for card_row in card_rows:
                     if res_levels:
                         res_str = " / ".join(f"₺{v:.2f}" for v in res_levels[:2])
                 if len(series) >= 35:
-                    zone, yorum, sig_score = zone_signal(series, volume=vol_series)
+                    zone, yorum, sig_score = zone_signal(series, volume=vol_series, high=high_series, low=low_series)
 
             delta_val = row['Artış / Düşüş (%)']
             delta_color = "#22c55e" if delta_val >= 0 else "#ef4444"
             delta_sign = "+" if delta_val >= 0 else ""
 
-            # Sinyal gücüne göre çerçeve kalınlığı: |score| 2→2px, 3→4px, 4→6px
-            border_width = {2: "2px", 3: "4px", 4: "6px"}.get(abs(sig_score), "1px")
+            daily_html = ""
+            if daily_pct is not None:
+                daily_color = "#22c55e" if daily_pct >= 0 else "#ef4444"
+                daily_sign = "+" if daily_pct >= 0 else ""
+                daily_html = f"<span style='color:{daily_color};margin-left:14px;'>{daily_sign}{daily_pct:.2f}%</span>"
+
+            # Sinyal gücüne göre çerçeve kalınlığı: |score| 2→2px, 3→4px, 4→6px, 5→8px, 6→10px
+            border_width = {2: "2px", 3: "4px", 4: "6px", 5: "8px", 6: "10px"}.get(abs(sig_score), "1px")
             if zone == "buy":
                 border = f"{border_width} solid #22c55e"
                 card_bg = "background:rgba(34,197,94,0.18);"
@@ -371,7 +448,7 @@ for card_row in card_rows:
                 f"<div style='border:{border};{card_bg}border-radius:10px;padding:12px 14px;margin-bottom:4px;'>"
                 f"<div style='font-size:0.8rem;color:#aaa;margin-bottom:2px;'>{name}</div>"
                 f"<div style='font-size:1.35rem;font-weight:700;'>₺{row['Bitiş Değeri (₺)']:.2f}</div>"
-                f"<div style='color:{delta_color};font-size:0.9rem;font-weight:600;margin-bottom:6px;'>{delta_sign}{delta_val:.2f}%</div>"
+                f"<div style='color:{delta_color};font-size:0.9rem;font-weight:600;margin-bottom:6px;'>{delta_sign}{delta_val:.2f}%{daily_html}</div>"
                 f"<div style='font-size:0.8rem;color:#888;line-height:1.8;'>"
                 f"Başlangıç: ₺{row['Başlangıç Değeri (₺)']:.2f}<br>"
                 f"En Yüksek: ₺{row['En Yüksek (₺)']:.2f} ({row['En Yüksek Tarih']})<br>"
